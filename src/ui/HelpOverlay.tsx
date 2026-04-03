@@ -32,6 +32,7 @@ export function HelpOverlay({ onClose }: HelpOverlayProps) {
         <Box flexDirection="column" marginLeft={2} marginY={1}>
           <HelpItem command="/help" description="Show this help screen" />
           <HelpItem command="/clear" description="Clear conversation history" />
+          <HelpItem command="/tokens" description="Show token usage for current conversation" />
           <HelpItem command="/sessions" description="List saved sessions" />
           <HelpItem command="/resume [id]" description="Resume a saved session or the latest one" />
           <HelpItem command="/delete <id>" description="Delete a saved session" />

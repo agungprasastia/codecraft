@@ -7,6 +7,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Agent, createAgent } from '../core/agent';
 import { getSessionStorage } from '../core/session-storage';
+import { getTokenUsage, formatTokenUsage } from '../core/token-counter';
 import type { SessionSummary } from '../core/session';
 import type { Message, StreamChunk, ToolCall, ToolResult, AgentMode } from '../types';
 import { ChatInput } from './ChatInput';
@@ -210,6 +211,12 @@ export function App({
           case 'sessions': {
             const sessions = await sessionStorage.list();
             appendSystemMessage(formatSessionList(sessions));
+            return;
+          }
+          case 'tokens': {
+            const allMessages = agent.getMessages();
+            const usage = getTokenUsage(allMessages, model);
+            appendSystemMessage(formatTokenUsage(usage));
             return;
           }
           case 'resume': {
