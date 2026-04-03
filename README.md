@@ -77,16 +77,17 @@ codecraft --plan
 
 ### In-App Commands
 
-| Command        | Description                              |
-| -------------- | ---------------------------------------- |
-| `/help`        | Show help screen                         |
-| `/clear`       | Clear conversation history               |
-| `/sessions`    | List saved sessions                      |
-| `/resume [id]` | Resume a saved session or the latest one |
-| `/delete <id>` | Delete a saved session                   |
-| `/mode build`  | Switch to BUILD mode (full access)       |
-| `/mode plan`   | Switch to PLAN mode (read-only)          |
-| `/exit`        | Exit Codecraft                           |
+| Command        | Description                               |
+| -------------- | ----------------------------------------- |
+| `/help`        | Show help screen                          |
+| `/clear`       | Clear conversation history                |
+| `/tokens`      | Show token usage for current conversation |
+| `/sessions`    | List saved sessions                       |
+| `/resume [id]` | Resume a saved session or the latest one  |
+| `/delete <id>` | Delete a saved session                    |
+| `/mode build`  | Switch to BUILD mode (full access)        |
+| `/mode plan`   | Switch to PLAN mode (read-only)           |
+| `/exit`        | Exit Codecraft                            |
 
 ### Keyboard Shortcuts
 
@@ -200,9 +201,9 @@ src/
 ## Roadmap
 
 - [ ] Tauri desktop app wrapper
-- [ ] Conversation persistence
+- [x] Conversation persistence
+- [x] Context management (token tracking & auto-truncation)
 - [ ] Plugin system for custom tools
-- [ ] Multi-file context awareness
 - [ ] Git integration
 - [ ] Project templates
 
