@@ -7,6 +7,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Agent, createAgent } from '../core/agent';
 import type { AgentConfig, Message, LLMProvider, ToolDefinition } from '../types';
 
+// Mock token counter with configurable return values
+const mockCountMessagesTokens = vi.fn();
+const mockGetModelContextLimit = vi.fn();
+
+vi.mock('./token-counter', () => ({
+  countMessagesTokens: (messages: Message[]) => mockCountMessagesTokens(messages),
+  getModelContextLimit: (model: string) => mockGetModelContextLimit(model),
+}));
+
 const mockSessionStorage = {
   create: vi.fn(),
   get: vi.fn(),
@@ -64,6 +73,10 @@ describe('Agent', () => {
       content: 'Test response',
       timestamp: new Date(),
     });
+
+    // Default token counter mocks - under threshold
+    mockCountMessagesTokens.mockReturnValue(1000);
+    mockGetModelContextLimit.mockReturnValue(8192);
 
     mockSessionStorage.get.mockResolvedValue(null);
     mockSessionStorage.create.mockImplementation(async (metadata, sessionId) => ({
@@ -392,5 +405,169 @@ describe('createAgent', () => {
     });
 
     expect(agent).toBeInstanceOf(Agent);
+  });
+});
+
+describe('Context Truncation', () => {
+  let agent: Agent;
+  let defaultConfig: AgentConfig;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    defaultConfig = {
+      mode: 'build',
+      provider: 'openai',
+      model: 'gpt-4',
+    };
+
+    // Reset mock provider
+    (mockProvider.chat as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'msg_response',
+      role: 'assistant',
+      content: 'Test response',
+      timestamp: new Date(),
+    });
+
+    mockSessionStorage.get.mockResolvedValue(null);
+    mockSessionStorage.create.mockResolvedValue({
+      id: 'test-session',
+      title: 'Test Session',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      messages: [],
+      metadata: {
+        mode: 'build',
+        provider: 'openai',
+        model: 'gpt-4',
+        workingDirectory: '.',
+        messageCount: 0,
+      },
+    });
+    mockSessionStorage.update.mockResolvedValue({
+      id: 'test-session',
+      title: 'Test Session',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      messages: [],
+      metadata: {
+        mode: 'build',
+        provider: 'openai',
+        model: 'gpt-4',
+        workingDirectory: '.',
+        messageCount: 0,
+      },
+    });
+  });
+
+  it('should not truncate when under threshold', async () => {
+    // Under 80% of 8192 = 6553 threshold
+    mockCountMessagesTokens.mockReturnValue(5000);
+    mockGetModelContextLimit.mockReturnValue(8192);
+
+    agent = createAgent(defaultConfig);
+    await agent.chat('Hello');
+
+    const messages = agent.getMessages();
+    // Should have system + user + assistant (no truncation notice)
+    expect(messages).toHaveLength(3);
+    expect(messages.every((m) => !m.content.includes('Context truncated'))).toBe(true);
+  });
+
+  it('should truncate oldest messages when over 80% of limit', async () => {
+    // Set up to be over threshold: 80% of 8192 = 6553
+    mockGetModelContextLimit.mockReturnValue(8192);
+
+    // First call (before chat): return high value to trigger truncation
+    // Subsequent calls: return lower value
+    let callCount = 0;
+    mockCountMessagesTokens.mockImplementation((messages: Message[]) => {
+      callCount++;
+      // First call during processConversation - over threshold
+      if (callCount === 1) return 7000;
+      // After truncation - under threshold
+      return 4000;
+    });
+
+    // Create agent with many messages to simulate long conversation
+    agent = createAgent(defaultConfig);
+
+    // Manually add messages to simulate long conversation (more than MIN_RECENT_MESSAGES=10)
+    const state = agent.getState();
+    for (let i = 0; i < 15; i++) {
+      state.messages.push({
+        id: `user_${i}`,
+        role: 'user',
+        content: `Message ${i}`,
+        timestamp: new Date(),
+      });
+      state.messages.push({
+        id: `assistant_${i}`,
+        role: 'assistant',
+        content: `Response ${i}`,
+        timestamp: new Date(),
+      });
+    }
+
+    await agent.chat('Trigger truncation');
+
+    const messages = agent.getMessages();
+    // Should have truncation notice in messages
+    const truncationNotice = messages.find((m) => m.content.includes('Context truncated'));
+    expect(truncationNotice).toBeDefined();
+  });
+
+  it('should keep system message intact', async () => {
+    mockGetModelContextLimit.mockReturnValue(8192);
+    mockCountMessagesTokens.mockReturnValueOnce(7000).mockReturnValue(3000);
+
+    agent = createAgent(defaultConfig);
+
+    // Add messages
+    const state = agent.getState();
+    for (let i = 0; i < 20; i++) {
+      state.messages.push({
+        id: `msg_${i}`,
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `Message ${i}`,
+        timestamp: new Date(),
+      });
+    }
+
+    await agent.chat('Test');
+
+    const messages = agent.getMessages();
+    // System message should be first
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toContain('BUILD mode');
+  });
+
+  it('should keep last 10 messages minimum', async () => {
+    mockGetModelContextLimit.mockReturnValue(8192);
+    mockCountMessagesTokens.mockReturnValueOnce(7500).mockReturnValue(3000);
+
+    agent = createAgent(defaultConfig);
+
+    // Add exactly 12 non-system messages
+    const state = agent.getState();
+    for (let i = 0; i < 12; i++) {
+      state.messages.push({
+        id: `msg_${i}`,
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `Message ${i}`,
+        timestamp: new Date(),
+      });
+    }
+
+    await agent.chat('Test');
+
+    const messages = agent.getMessages();
+    const nonSystemMessages = messages.filter(
+      (m) => m.role !== 'system' && !m.content.includes('Context truncated')
+    );
+
+    // Should have at least 10 recent messages + the new user/assistant pair
+    // Plus potential truncation notice
+    expect(nonSystemMessages.length).toBeGreaterThanOrEqual(10);
   });
 });

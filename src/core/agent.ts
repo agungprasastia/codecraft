@@ -19,6 +19,21 @@ import { getAllTools, getPlanModeTools } from '../tools';
 import { appConfig } from './config';
 import { getSessionStorage } from './session-storage';
 import type { SessionMetadata } from './session';
+import { countMessagesTokens, getModelContextLimit } from './token-counter';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Truncate context when usage exceeds this percentage of the limit
+ */
+const TRUNCATION_THRESHOLD = 0.8;
+
+/**
+ * Minimum number of recent messages to keep (excluding system message)
+ */
+const MIN_RECENT_MESSAGES = 10;
 
 export interface AgentEvents {
   onMessage: (message: Message) => void;
@@ -139,6 +154,9 @@ Mode: ${this.config.mode.toUpperCase()}`;
 
   private async processConversation(): Promise<Message> {
     while (true) {
+      // Truncate context if needed before API call
+      this.truncateContextIfNeeded();
+
       // Get LLM response
       const assistantMessage = await this.provider.chat(
         this.state.messages,
@@ -316,6 +334,68 @@ Mode: ${this.config.mode.toUpperCase()}`;
       const err = error instanceof Error ? error : new Error(String(error));
       this.events.onError?.(err);
     });
+  }
+
+  /**
+   * Truncate old messages when context exceeds threshold
+   * Keeps system message and minimum recent messages
+   */
+  private truncateContextIfNeeded(): void {
+    const contextLimit = getModelContextLimit(this.config.model);
+    const threshold = contextLimit * TRUNCATION_THRESHOLD;
+    const currentTokens = countMessagesTokens(this.state.messages);
+
+    // No truncation needed if under threshold
+    if (currentTokens <= threshold) {
+      return;
+    }
+
+    // Separate system message and other messages
+    const systemMessage = this.state.messages.find((m) => m.role === 'system');
+    const otherMessages = this.state.messages.filter((m) => m.role !== 'system');
+
+    // Must keep at least MIN_RECENT_MESSAGES
+    if (otherMessages.length <= MIN_RECENT_MESSAGES) {
+      return;
+    }
+
+    // Calculate how many tokens we need to remove
+    const targetTokens = threshold * 0.7; // Target 70% to leave room
+    let tokensToRemove = currentTokens - targetTokens;
+
+    // Remove oldest messages until under threshold or at minimum
+    const messagesToRemove: number[] = [];
+    let removedTokens = 0;
+
+    for (let i = 0; i < otherMessages.length - MIN_RECENT_MESSAGES; i++) {
+      if (removedTokens >= tokensToRemove) {
+        break;
+      }
+      const msgTokens = countMessagesTokens([otherMessages[i]]);
+      removedTokens += msgTokens;
+      messagesToRemove.push(i);
+    }
+
+    // If no messages to remove, nothing to do
+    if (messagesToRemove.length === 0) {
+      return;
+    }
+
+    // Build new message array
+    const keptMessages = otherMessages.filter((_, idx) => !messagesToRemove.includes(idx));
+
+    // Add truncation notice
+    const truncationNotice: Message = {
+      id: this.generateId(),
+      role: 'system',
+      content: `[Context truncated: ${messagesToRemove.length} older messages removed to stay within token limits]`,
+      timestamp: new Date(),
+    };
+
+    // Rebuild messages: system + truncation notice + kept messages
+    this.state.messages = systemMessage
+      ? [systemMessage, truncationNotice, ...keptMessages]
+      : [truncationNotice, ...keptMessages];
   }
 
   private getApiKey(provider: string): string {
