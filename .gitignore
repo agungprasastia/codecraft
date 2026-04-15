@@ -31,3 +31,21 @@ coverage/
 # Cache
 .cache/
 *.tsbuildinfo
+
+# ECC - MCP configs may contain API keys
+mcp-configs/*.local.json
+mcp-configs/secrets/
+
+# OpenCode local settings
+.opencode/*.local.json
+
+# Local workspace noise from the agent environment
+.qa-appdata/
+.qa-temp/
+AGENTS.md
+agents/
+rules/
+skills/
+
+# Sisyphus work plans (optional - uncomment if you don't want to track)
+# .sisyphus/
