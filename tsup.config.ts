@@ -26,4 +26,14 @@ export default defineConfig([
     target: 'node18',
     external: ['react', 'ink'],
   },
+  // Server entry - HTTP bridge for desktop integration
+  {
+    entry: ['src/server/index.ts'],
+    format: ['esm'],
+    outDir: 'dist/server',
+    splitting: false,
+    sourcemap: true,
+    target: 'node18',
+    external: ['express', 'react', 'ink'],
+  },
 ]);
