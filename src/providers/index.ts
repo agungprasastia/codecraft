@@ -4,31 +4,38 @@
  */
 
 import type { LLMProvider, ProviderConfig } from '../types';
-import { OpenAIProvider } from './openai';
-import { AnthropicProvider } from './anthropic';
-import { GoogleProvider } from './google';
-import { OllamaProvider } from './ollama';
+import { providerRegistry } from './registry';
 
 export { BaseProvider } from './base';
-export { OpenAIProvider, AnthropicProvider, GoogleProvider, OllamaProvider };
+export { OpenAIProvider } from './openai';
+export { AnthropicProvider } from './anthropic';
+export { GoogleProvider } from './google';
+export { OllamaProvider } from './ollama';
+export {
+  ProviderRegistry,
+  createProviderRegistry,
+  getDefaultProviderModel,
+  isKnownProvider,
+  listAvailableProviders,
+  providerRegistry,
+  providerRequiresApiKey,
+  registerBuiltInProviders,
+  validateProviderConfig,
+} from './registry';
+export {
+  DEFAULT_MODELS,
+  MODEL_CATALOG,
+  getDefaultModelForProvider,
+  getModelCatalogEntry,
+  getModelContextWindow,
+  getModelsForProvider,
+  isSupportedProvider,
+  listSupportedProviders,
+} from './models';
 
 /**
  * Factory function to create provider instances
  */
-export function createProvider(
-  providerName: string,
-  config: ProviderConfig
-): LLMProvider {
-  switch (providerName.toLowerCase()) {
-    case 'openai':
-      return new OpenAIProvider(config);
-    case 'anthropic':
-      return new AnthropicProvider(config);
-    case 'google':
-      return new GoogleProvider(config);
-    case 'ollama':
-      return new OllamaProvider(config);
-    default:
-      throw new Error(`Unknown provider: ${providerName}`);
-  }
+export function createProvider(providerName: string, config: ProviderConfig): LLMProvider {
+  return providerRegistry.getProvider(providerName, config);
 }
