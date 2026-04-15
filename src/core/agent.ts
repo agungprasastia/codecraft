@@ -34,6 +34,7 @@ const TRUNCATION_THRESHOLD = 0.8;
  * Minimum number of recent messages to keep (excluding system message)
  */
 const MIN_RECENT_MESSAGES = 10;
+const STREAM_BATCH_DELAY_MS = 16;
 
 export interface AgentEvents {
   onMessage: (message: Message) => void;
@@ -67,6 +68,7 @@ export class Agent {
     const apiKey = this.getApiKey(config.provider);
     this.provider = createProvider(config.provider, {
       apiKey,
+      baseUrl: this.getBaseUrl(config.provider),
       model: config.model,
       maxTokens: config.maxTokens,
       temperature: config.temperature,
@@ -157,13 +159,24 @@ Mode: ${this.config.mode.toUpperCase()}`;
       // Truncate context if needed before API call
       this.truncateContextIfNeeded();
 
+      const streamBatcher = this.createStreamBatcher();
+
       // Get LLM response
-      const assistantMessage = await this.provider.chat(
-        this.state.messages,
-        this.tools,
-        (chunk) => this.events.onStreamChunk?.(chunk),
-        this.abortController?.signal
-      );
+      let assistantMessage: Message;
+
+      try {
+        assistantMessage = await this.provider.chat(
+          this.state.messages,
+          this.tools,
+          (chunk) => streamBatcher.handleChunk(chunk),
+          this.abortController?.signal
+        );
+      } catch (error) {
+        streamBatcher.flush();
+        throw error;
+      }
+
+      streamBatcher.flush();
 
       this.state.messages.push(assistantMessage);
       this.events.onMessage?.(assistantMessage);
@@ -405,6 +418,57 @@ Mode: ${this.config.mode.toUpperCase()}`;
     }
     // Ollama doesn't need API key
     return '';
+  }
+
+  private getBaseUrl(provider: string): string | undefined {
+    if (provider === 'openai' || provider === 'ollama') {
+      return appConfig.getProviderBaseUrl(provider);
+    }
+
+    return undefined;
+  }
+
+  private createStreamBatcher(): { handleChunk: (chunk: StreamChunk) => void; flush: () => void } {
+    let bufferedText = '';
+    let flushTimeout: ReturnType<typeof setTimeout> | undefined;
+
+    const flush = (): void => {
+      if (flushTimeout) {
+        clearTimeout(flushTimeout);
+        flushTimeout = undefined;
+      }
+
+      if (!bufferedText) {
+        return;
+      }
+
+      this.events.onStreamChunk?.({ type: 'text', content: bufferedText });
+      bufferedText = '';
+    };
+
+    const scheduleFlush = (): void => {
+      if (flushTimeout) {
+        return;
+      }
+
+      flushTimeout = setTimeout(() => {
+        flush();
+      }, STREAM_BATCH_DELAY_MS);
+    };
+
+    return {
+      handleChunk: (chunk: StreamChunk) => {
+        if (chunk.type === 'text' && chunk.content) {
+          bufferedText += chunk.content;
+          scheduleFlush();
+          return;
+        }
+
+        flush();
+        this.events.onStreamChunk?.(chunk);
+      },
+      flush,
+    };
   }
 }
 

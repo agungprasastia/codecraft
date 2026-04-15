@@ -7,24 +7,39 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Agent, createAgent } from '../core/agent';
 import type { AgentConfig, Message, LLMProvider, ToolDefinition } from '../types';
 
-// Mock token counter with configurable return values
-const mockCountMessagesTokens = vi.fn();
-const mockGetModelContextLimit = vi.fn();
+const {
+  mockCountMessagesTokens,
+  mockCreateProvider,
+  mockGetModelContextLimit,
+  mockProvider,
+  mockSessionStorage,
+} = vi.hoisted(() => {
+  const provider: LLMProvider = {
+    name: 'mock',
+    chat: vi.fn(),
+  };
+
+  return {
+    mockCountMessagesTokens: vi.fn(),
+    mockCreateProvider: vi.fn(() => provider),
+    mockGetModelContextLimit: vi.fn(),
+    mockProvider: provider,
+    mockSessionStorage: {
+      create: vi.fn(),
+      get: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      list: vi.fn(),
+      getLatest: vi.fn(),
+      search: vi.fn(),
+    },
+  };
+});
 
 vi.mock('./token-counter', () => ({
   countMessagesTokens: (messages: Message[]) => mockCountMessagesTokens(messages),
   getModelContextLimit: (model: string) => mockGetModelContextLimit(model),
 }));
-
-const mockSessionStorage = {
-  create: vi.fn(),
-  get: vi.fn(),
-  update: vi.fn(),
-  delete: vi.fn(),
-  list: vi.fn(),
-  getLatest: vi.fn(),
-  search: vi.fn(),
-};
 
 vi.mock('./session-storage', () => ({
   getSessionStorage: vi.fn(() => mockSessionStorage),
@@ -32,14 +47,8 @@ vi.mock('./session-storage', () => ({
 
 // Mock the providers module
 vi.mock('../providers', () => ({
-  createProvider: vi.fn(() => mockProvider),
+  createProvider: mockCreateProvider,
 }));
-
-// Mock provider for testing
-const mockProvider: LLMProvider = {
-  name: 'mock',
-  chat: vi.fn(),
-};
 
 // Mock the tools module
 vi.mock('../tools', () => ({
@@ -59,6 +68,7 @@ describe('Agent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
 
     defaultConfig = {
       mode: 'build',
@@ -101,6 +111,8 @@ describe('Agent', () => {
         messageCount: messages.length,
       },
     }));
+
+    mockCreateProvider.mockImplementation(() => mockProvider);
   });
 
   describe('Initialization', () => {
@@ -277,6 +289,138 @@ describe('Agent', () => {
           model: 'gpt-4-turbo-preview',
         })
       );
+    });
+
+    it('should pass configured baseUrl when creating the provider', () => {
+      agent = createAgent({ ...defaultConfig, provider: 'ollama' });
+
+      expect(mockCreateProvider).toHaveBeenCalledWith(
+        'ollama',
+        expect.objectContaining({
+          baseUrl: undefined,
+          model: 'gpt-4-turbo-preview',
+        })
+      );
+    });
+  });
+
+  describe('Stream batching', () => {
+    it('should batch consecutive text chunks before done', async () => {
+      const onStreamChunk = vi.fn();
+      agent = createAgent(defaultConfig, { onStreamChunk });
+
+      (mockProvider.chat as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (_messages, _tools, onChunk) => {
+          onChunk({ type: 'text', content: 'Hello ' });
+          onChunk({ type: 'text', content: 'world' });
+          onChunk({ type: 'done' });
+
+          return {
+            id: 'msg_response',
+            role: 'assistant',
+            content: 'Hello world',
+            timestamp: new Date(),
+          };
+        }
+      );
+
+      await agent.chat('Stream please');
+
+      expect(onStreamChunk.mock.calls).toEqual([
+        [{ type: 'text', content: 'Hello world' }],
+        [{ type: 'done' }],
+      ]);
+    });
+
+    it('should flush buffered text before tool call events', async () => {
+      const onStreamChunk = vi.fn();
+      agent = createAgent(defaultConfig, { onStreamChunk });
+
+      (mockProvider.chat as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (_messages, _tools, onChunk) => {
+          onChunk({ type: 'text', content: 'Preparing ' });
+          onChunk({ type: 'text', content: 'tool' });
+          onChunk({
+            type: 'tool_call',
+            toolCall: { id: 'call_1', name: 'read_file', arguments: { path: 'src/index.ts' } },
+          });
+          onChunk({ type: 'done' });
+
+          return {
+            id: 'msg_response',
+            role: 'assistant',
+            content: 'Preparing tool',
+            timestamp: new Date(),
+          };
+        }
+      );
+
+      await agent.chat('Use a tool');
+
+      expect(onStreamChunk.mock.calls).toEqual([
+        [{ type: 'text', content: 'Preparing tool' }],
+        [
+          {
+            type: 'tool_call',
+            toolCall: { id: 'call_1', name: 'read_file', arguments: { path: 'src/index.ts' } },
+          },
+        ],
+        [{ type: 'done' }],
+      ]);
+    });
+
+    it('should flush buffered text when provider errors', async () => {
+      const onStreamChunk = vi.fn();
+      const onError = vi.fn();
+      agent = createAgent(defaultConfig, { onError, onStreamChunk });
+
+      (mockProvider.chat as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (_messages, _tools, onChunk) => {
+          onChunk({ type: 'text', content: 'Partial ' });
+          onChunk({ type: 'text', content: 'response' });
+          throw new Error('stream failed');
+        }
+      );
+
+      await expect(agent.chat('Break')).rejects.toThrow('stream failed');
+
+      expect(onStreamChunk).toHaveBeenCalledWith({ type: 'text', content: 'Partial response' });
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'stream failed' }));
+    });
+
+    it('should flush buffered text on timer without waiting for done', async () => {
+      vi.useFakeTimers();
+
+      const onStreamChunk = vi.fn();
+      agent = createAgent(defaultConfig, { onStreamChunk });
+
+      (mockProvider.chat as ReturnType<typeof vi.fn>).mockImplementationOnce(
+        async (_messages, _tools, onChunk) =>
+          new Promise((resolve) => {
+            onChunk({ type: 'text', content: 'Buffered ' });
+            onChunk({ type: 'text', content: 'output' });
+
+            setTimeout(() => {
+              resolve({
+                id: 'msg_response',
+                role: 'assistant',
+                content: 'Buffered output',
+                timestamp: new Date(),
+              });
+            }, 50);
+          })
+      );
+
+      const chatPromise = agent.chat('Timer test');
+
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(onStreamChunk).toHaveBeenCalledWith({ type: 'text', content: 'Buffered output' });
+
+      await vi.advanceTimersByTimeAsync(50);
+      await chatPromise;
     });
   });
 
