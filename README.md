@@ -10,7 +10,7 @@
 - 🎨 **Beautiful TUI**: Polished terminal interface built with React (Ink)
 - 🔧 **Powerful Tools**: Read/write files, execute commands, search codebases
 - 🛡️ **Safe Modes**: BUILD mode for full access, PLAN mode for read-only exploration
-- ⚙️ **Configurable**: Bring your own API keys, customize models and settings
+- ⚙️ **Configurable**: Bring your own API keys, customize models, base URLs, and settings
 
 ## Installation
 
@@ -32,6 +32,8 @@ export OPENAI_API_KEY=sk-...
 
 # Option 2: Config command
 codecraft config set openai.apiKey sk-...
+codecraft config set openai.baseUrl https://api.openai.com/v1
+codecraft config set ollama.baseUrl http://localhost:11434
 ```
 
 2. Run Codecraft:
@@ -152,6 +154,14 @@ codecraft config set defaultModel claude-3-opus-20240229
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `GOOGLE_API_KEY`    | Google AI API key |
 
+### Provider Config
+
+| Key              | Description                         |
+| ---------------- | ----------------------------------- |
+| `openai.apiKey`  | OpenAI API key                      |
+| `openai.baseUrl` | Optional OpenAI-compatible endpoint |
+| `ollama.baseUrl` | Local Ollama endpoint               |
+
 ## Development
 
 ```bash
@@ -178,7 +188,7 @@ npm test
 src/
 ├── cli/           # CLI entry point
 ├── core/          # Agent and configuration
-├── providers/     # LLM provider implementations
+├── providers/     # LLM providers, registry, and model catalog
 │   ├── openai.ts
 │   ├── anthropic.ts
 │   ├── google.ts
