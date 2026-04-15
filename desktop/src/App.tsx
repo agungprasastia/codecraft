@@ -94,7 +94,7 @@ function App() {
   const setupInputHandler = (terminal: Terminal) => {
     let currentLine = '';
 
-    terminal.onData((data) => {
+    terminal.onData((data: string) => {
       // Handle special keys
       if (data === '\r') {
         // Enter
@@ -140,7 +140,26 @@ function App() {
       terminal.writeln('\x1b[33mCommands:\x1b[0m');
       terminal.writeln('  /help   - Show this help');
       terminal.writeln('  /clear  - Clear terminal');
+      terminal.writeln('  /server - Check local API server health');
       terminal.writeln('  /exit   - Exit application');
+      terminal.writeln('');
+      terminal.write('\x1b[36m> \x1b[0m');
+      return;
+    }
+
+    if (command === '/server') {
+      terminal.writeln('\x1b[90mChecking http://127.0.0.1:3000/health...\x1b[0m');
+      try {
+        const response = await fetch('http://127.0.0.1:3000/health');
+        const body = (await response.json()) as { status?: string };
+        if (response.ok && body.status === 'ok') {
+          terminal.writeln('\x1b[32m✓ Local server is running\x1b[0m');
+        } else {
+          terminal.writeln(`\x1b[31mServer check failed: HTTP ${response.status}\x1b[0m`);
+        }
+      } catch (error) {
+        terminal.writeln(`\x1b[31mServer unreachable: ${String(error)}\x1b[0m`);
+      }
       terminal.writeln('');
       terminal.write('\x1b[36m> \x1b[0m');
       return;
@@ -163,7 +182,7 @@ function App() {
   return (
     <div className="app">
       <div className="titlebar">
-        <div className="titlebar-title">⚡ Codecraft</div>
+        <div className="titlebar-title">⚡ Codecraft {isReady ? '' : '(starting...)'}</div>
         <div className="titlebar-buttons">
           <button className="titlebar-button minimize" onClick={() => invoke('minimize_window')}>
             −
