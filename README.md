@@ -213,6 +213,7 @@ src/
 - [ ] Tauri desktop app wrapper
 - [x] Conversation persistence
 - [x] Context management (token tracking & auto-truncation)
+- [x] Provider improvements (registry, model catalog, caching, safer base URLs)
 - [ ] Plugin system for custom tools
 - [ ] Git integration
 - [ ] Project templates
