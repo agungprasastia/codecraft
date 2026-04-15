@@ -125,7 +125,7 @@ export interface LLMProvider {
 
 export interface AppConfig {
   providers: {
-    openai?: { apiKey: string; baseUrl?: string };
+    openai?: { apiKey?: string; baseUrl?: string };
     anthropic?: { apiKey: string };
     google?: { apiKey: string };
     ollama?: { baseUrl: string };

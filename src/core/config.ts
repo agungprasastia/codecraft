@@ -8,7 +8,7 @@ import type { AppConfig } from '../types';
 
 interface ConfigSchema {
   providers: {
-    openai?: { apiKey: string; baseUrl?: string };
+    openai?: { apiKey?: string; baseUrl?: string };
     anthropic?: { apiKey: string };
     google?: { apiKey: string };
     ollama?: { baseUrl: string };
@@ -62,6 +62,12 @@ export const appConfig = {
     config.set('providers', providers);
   },
 
+  setOpenAIBaseUrl(baseUrl: string): void {
+    const providers = config.get('providers') ?? {};
+    providers.openai = { ...providers.openai, baseUrl };
+    config.set('providers', providers);
+  },
+
   getProviderApiKey(provider: 'openai' | 'anthropic' | 'google'): string | undefined {
     const providers = config.get('providers') ?? {};
     const storedKey = providers[provider]?.apiKey;
@@ -70,6 +76,11 @@ export const appConfig = {
     }
 
     return process.env[`${provider.toUpperCase()}_API_KEY`];
+  },
+
+  getProviderBaseUrl(provider: 'openai' | 'ollama'): string | undefined {
+    const providers = config.get('providers') ?? {};
+    return providers[provider]?.baseUrl;
   },
 
   setDefaultProvider(provider: string): void {

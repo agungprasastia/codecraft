@@ -11,13 +11,20 @@ import { App } from '../ui/App';
 import { appConfig } from '../core/config';
 import { getSessionStorage } from '../core/session-storage';
 import type { AgentMode } from '../types';
+import {
+  getDefaultProviderModel,
+  isKnownProvider,
+  listAvailableProviders,
+  providerRequiresApiKey,
+} from '../providers';
 
 const program = new Command();
+const providerChoices = listAvailableProviders().join(', ');
 
 program.name('codecraft').description('AI-powered coding agent for the terminal').version('0.1.0');
 
 program
-  .option('-p, --provider <provider>', 'LLM provider (openai, anthropic, google, ollama)')
+  .option('-p, --provider <provider>', `LLM provider (${providerChoices})`)
   .option('-m, --model <model>', 'Model to use')
   .option('--plan', 'Start in read-only PLAN mode')
   .option('--api-key <key>', 'API key for the provider')
@@ -27,6 +34,13 @@ program
 
     const provider =
       options.provider || existingSession?.metadata.provider || appConfig.get('defaultProvider');
+
+    if (!isKnownProvider(provider)) {
+      console.error(`Error: Unknown provider \"${provider}\".`);
+      console.error(`Supported providers: ${providerChoices}`);
+      process.exit(1);
+    }
+
     let model = options.model;
     const mode: AgentMode = options.plan ? 'plan' : existingSession?.metadata.mode || 'build';
 
@@ -36,22 +50,7 @@ program
 
     // Set default model based on provider if not specified
     if (!model) {
-      switch (provider) {
-        case 'openai':
-          model = 'gpt-4-turbo-preview';
-          break;
-        case 'anthropic':
-          model = 'claude-3-opus-20240229';
-          break;
-        case 'google':
-          model = 'gemini-pro';
-          break;
-        case 'ollama':
-          model = 'llama2';
-          break;
-        default:
-          model = appConfig.get('defaultModel');
-      }
+      model = getDefaultProviderModel(provider) || appConfig.get('defaultModel');
     }
 
     // Handle API key
@@ -60,8 +59,11 @@ program
     }
 
     // Verify API key exists
-    const apiKey = appConfig.getProviderApiKey(provider);
-    if (!apiKey && provider !== 'ollama') {
+    const apiKey =
+      provider !== 'ollama' && providerRequiresApiKey(provider)
+        ? appConfig.getProviderApiKey(provider)
+        : undefined;
+    if (!apiKey && providerRequiresApiKey(provider)) {
       console.error(`Error: No API key found for ${provider}.`);
       console.error(`Set it via:`);
       console.error(`  - Environment variable: ${provider.toUpperCase()}_API_KEY`);
@@ -109,6 +111,9 @@ program
           const [provider, prop] = key.split('.');
           if (prop === 'apiKey' && ['openai', 'anthropic', 'google'].includes(provider)) {
             appConfig.setProviderApiKey(provider as 'openai' | 'anthropic' | 'google', value);
+            console.log(`Set ${key}`);
+          } else if (provider === 'openai' && prop === 'baseUrl') {
+            appConfig.setOpenAIBaseUrl(value);
             console.log(`Set ${key}`);
           } else if (provider === 'ollama' && prop === 'baseUrl') {
             appConfig.setOllamaUrl(value);

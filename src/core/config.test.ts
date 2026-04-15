@@ -140,6 +140,38 @@ describe('appConfig', () => {
     });
   });
 
+  describe('setOpenAIBaseUrl', () => {
+    it('should set OpenAI base URL', () => {
+      appConfig.setOpenAIBaseUrl('https://api.openai.com/v1');
+
+      const providers = appConfig.get('providers');
+      expect(providers.openai?.baseUrl).toBe('https://api.openai.com/v1');
+    });
+
+    it('should preserve existing OpenAI API key when setting baseUrl', () => {
+      appConfig.setProviderApiKey('openai', 'sk-test-key');
+      appConfig.setOpenAIBaseUrl('https://openrouter.ai/api/v1');
+
+      const providers = appConfig.get('providers');
+      expect(providers.openai?.apiKey).toBe('sk-test-key');
+      expect(providers.openai?.baseUrl).toBe('https://openrouter.ai/api/v1');
+    });
+  });
+
+  describe('getProviderBaseUrl', () => {
+    it('should retrieve stored OpenAI base URL', () => {
+      appConfig.setOpenAIBaseUrl('https://api.openai.com/v1');
+
+      expect(appConfig.getProviderBaseUrl('openai')).toBe('https://api.openai.com/v1');
+    });
+
+    it('should retrieve stored Ollama base URL', () => {
+      appConfig.setOllamaUrl('http://localhost:11434');
+
+      expect(appConfig.getProviderBaseUrl('ollama')).toBe('http://localhost:11434');
+    });
+  });
+
   describe('getConfigPath', () => {
     it('should return config file path', () => {
       const path = appConfig.getConfigPath();
